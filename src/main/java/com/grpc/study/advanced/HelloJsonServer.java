@@ -1,33 +1,33 @@
-package com.grpc.study.hedging;
+package com.grpc.study.advanced;
 
-import io.grpc.*;
+import io.grpc.BindableService;
+import io.grpc.Server;
+import io.grpc.ServerBuilder;
+import io.grpc.ServerServiceDefinition;
 import io.grpc.examples.helloworld.GreeterGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
+import io.grpc.stub.ServerCalls;
 import io.grpc.stub.StreamObserver;
 
 import java.io.IOException;
-import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
-/**
- * 对冲 一次发送多个请求
- */
-public class HedgingHelloWorldServer {
+import static io.grpc.stub.ServerCalls.asyncUnaryCall;
 
-    private static final Logger logger = Logger.getLogger(HedgingHelloWorldServer.class.getName());
+public class HelloJsonServer {
+    private static final Logger logger = Logger.getLogger(HelloJsonServer.class.getName());
 
     private Server server;
 
     private void start() throws IOException {
-        int port = 50052;
+        /* The port on which the server should run */
+        int port = 50051;
         server = ServerBuilder.forPort(port)
                 .addService(new GreeterImpl())
-                .intercept(new LatencyInjectionInterceptor())
                 .build()
                 .start();
-
         logger.info("Server started, listening on " + port);
         Runtime.getRuntime().addShutdownHook(new Thread() {
             @Override
@@ -35,17 +35,14 @@ public class HedgingHelloWorldServer {
                 // Use stderr here since the logger may have been reset by its JVM shutdown hook.
                 System.err.println("*** shutting down gRPC server since JVM is shutting down");
                 try {
-                    HedgingHelloWorldServer.this.stop();
+                    HelloJsonServer.this.stop();
                 } catch (InterruptedException e) {
                     e.printStackTrace(System.err);
                 }
                 System.err.println("*** server shut down");
             }
         });
-
     }
-
-
 
     private void stop() throws InterruptedException {
         if (server != null) {
@@ -66,49 +63,33 @@ public class HedgingHelloWorldServer {
      * Main launches the server from the command line.
      */
     public static void main(String[] args) throws IOException, InterruptedException {
-        final HedgingHelloWorldServer server = new HedgingHelloWorldServer();
+        final HelloJsonServer server = new HelloJsonServer();
         server.start();
         server.blockUntilShutdown();
     }
 
-    static class GreeterImpl extends GreeterGrpc.GreeterImplBase {
+    private static class GreeterImpl implements BindableService {
 
-        @Override
-        public void sayHello(HelloRequest req, StreamObserver<HelloReply> responseObserver) {
+        private void sayHello(HelloRequest req, StreamObserver<HelloReply> responseObserver) {
             HelloReply reply = HelloReply.newBuilder().setMessage("Hello " + req.getName()).build();
             responseObserver.onNext(reply);
             responseObserver.onCompleted();
         }
-    }
-
-    /**
-     * 随机延迟返回
-     */
-    static class LatencyInjectionInterceptor implements ServerInterceptor {
 
         @Override
-        public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(ServerCall<ReqT, RespT> call,
-                                                                     Metadata headers, ServerCallHandler<ReqT, RespT> next) {
-
-            int random = new Random().nextInt(100);
-            int delay = 0;
-            if (random < 1) {
-                delay = 10_000;
-            } else if (random < 5) {
-                delay = 5_000;
-            } else if (random < 10) {
-                delay = 2_000;
-            }
-
-            if (delay > 0) {
-                try {
-                    Thread.sleep(delay);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-
-            return next.startCall(call,headers);
+        public ServerServiceDefinition bindService() {
+            return io.grpc.ServerServiceDefinition
+                    .builder(GreeterGrpc.getServiceDescriptor().getName())
+                    .addMethod(HelloJsonClient.HelloJsonStub.METHOD_SAY_HELLO,
+                            asyncUnaryCall(
+                                    new ServerCalls.UnaryMethod<HelloRequest, HelloReply>() {
+                                        @Override
+                                        public void invoke(
+                                                HelloRequest request, StreamObserver<HelloReply> responseObserver) {
+                                            sayHello(request, responseObserver);
+                                        }
+                                    }))
+                    .build();
         }
     }
 }
